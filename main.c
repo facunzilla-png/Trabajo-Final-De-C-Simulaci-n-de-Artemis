@@ -21,6 +21,7 @@ static void mostrar_menu(void)
     puts("  3. Análisis analítico (preguntas del escenario)");
     puts("  4. Ver reporte de la última misión");
     puts("  5. Reglas del juego");
+    puts("  6. Créditos");
     puts("  0. Salir");
 }
 
@@ -38,8 +39,10 @@ int main(void)
     cargar_datos_por_defecto(&datos);
 
     do {
+        limpiar_pantalla();
         mostrar_menu();
-        opcion = leer_entero("Elegí una opción", 0, 5);
+        opcion = leer_entero("Elegí una opción", 0, 6);
+        limpiar_pantalla();
 
         switch (opcion) {
         case 1:
@@ -51,6 +54,7 @@ int main(void)
                 ingresar_datos_mision(&datos);
                 puts("Datos actualizados.");
             }
+            pausar();
             break;
 
         case 2:
@@ -78,6 +82,11 @@ int main(void)
 
         case 5:
             mostrar_reglas();
+            pausar();
+            break;
+
+        case 6:
+            puts("\nIntegrantes:\nBorges, Facundo    Comisión K 1.1\nContreras, Santiago    Comisión K 1.1\nDabski, Santiago    Comisión K 1.1\nRetamozo, Kevin    Comisión K 1.1");
             pausar();
             break;
 
