@@ -3,7 +3,7 @@
 a) Integrantes
 
 Borges, Facundo; Comisión k 1.1
-Contreras, Santiago; Comisión k 1.1
+Contrera, Santiago; Comisión k 1.1
 Dabski, Santiago; Comisión k 1.1
 Retamozo, Kevin; Comisión k 1.1
 
