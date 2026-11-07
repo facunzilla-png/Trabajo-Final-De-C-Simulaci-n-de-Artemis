@@ -22,4 +22,7 @@ void mostrar_advertencia(const char *texto);
 /* Espera que el usuario presione ENTER. */
 void pausar(void);
 
+/* Borra la pantalla de la consola. */
+void limpiar_pantalla(void);
+
 #endif /* VALIDACIONES_H */

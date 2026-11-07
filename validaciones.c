@@ -185,3 +185,9 @@ void pausar(void)
     printf("\nPresioná ENTER para continuar...");
     leer_linea(buffer, TAM_BUFFER);
 }
+
+void limpiar_pantalla(void)
+{
+    printf("\033[2J\033[H");   /* secuencia ANSI: borrar pantalla y volver arriba */
+    fflush(stdout);
+}

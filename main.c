@@ -38,8 +38,10 @@ int main(void)
     cargar_datos_por_defecto(&datos);
 
     do {
+        limpiar_pantalla();
         mostrar_menu();
         opcion = leer_entero("Elegí una opción", 0, 5);
+        limpiar_pantalla();
 
         switch (opcion) {
         case 1:
@@ -51,6 +53,7 @@ int main(void)
                 ingresar_datos_mision(&datos);
                 puts("Datos actualizados.");
             }
+            pausar();
             break;
 
         case 2:
