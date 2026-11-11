@@ -3,6 +3,9 @@
  * Ingreso seguro de datos. Técnica usada: leer SIEMPRE una línea completa con
  * fgets() y luego convertirla con strtol()/strtod() verificando errores.
  * (scanf deja basura en el buffer y se rompe con letras: por eso no se usa).
+ *
+ * validar_double() concentra la validación de números reales: la usan tanto
+ * leer_double() (consola) como los cuadros de texto de la interfaz gráfica.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +16,7 @@
 #include "validaciones.h"
 
 #define TAM_BUFFER 64
+#define TAM_ERROR  96
 
 void mostrar_advertencia(const char *texto)
 {
@@ -71,6 +75,63 @@ static int caracteres_numericos(const char *p)
     return 1;
 }
 
+/* Copia un motivo de error en 'error' si el llamador pidió recibirlo. */
+static void poner_error(char *error, int tam_error, const char *motivo)
+{
+    if (error != NULL && tam_error > 0) {
+        snprintf(error, (size_t)tam_error, "%s", motivo);
+    }
+}
+
+int validar_double(const char *texto, double minimo, double maximo,
+                   double *salida, char *error, int tam_error)
+{
+    char copia[TAM_BUFFER];
+    char *fin;
+    double valor;
+    size_t i;
+
+    if (strlen(texto) >= TAM_BUFFER) {
+        poner_error(error, tam_error, "Entrada demasiado larga.");
+        return 0;
+    }
+    strcpy(copia, texto);            /* el largo ya se verificó arriba */
+
+    /* Aceptar coma decimal: "6,5" -> "6.5" */
+    for (i = 0; copia[i] != '\0'; i++) {
+        if (copia[i] == ',') {
+            copia[i] = '.';
+        }
+    }
+
+    if (!caracteres_numericos(copia)) {
+        poner_error(error, tam_error, "Ingresá solo un número (ejemplo: 6.5).");
+        return 0;
+    }
+
+    errno = 0;
+    valor = strtod(copia, &fin);
+
+    if (fin == copia || !solo_espacios(fin)) {
+        poner_error(error, tam_error, "Ingresá un número real válido (ejemplo: 6.5).");
+        return 0;
+    }
+    if (errno == ERANGE || !isfinite(valor)) {
+        poner_error(error, tam_error, "Número fuera de rango representable.");
+        return 0;
+    }
+    if (valor < minimo || valor > maximo) {
+        if (error != NULL && tam_error > 0) {
+            snprintf(error, (size_t)tam_error,
+                     "El valor debe estar entre %g y %g.", minimo, maximo);
+        }
+        return 0;
+    }
+
+    *salida = valor;
+    return 1;
+}
+
 int leer_entero(const char *mensaje, int minimo, int maximo)
 {
     char buffer[TAM_BUFFER];
@@ -103,9 +164,8 @@ int leer_entero(const char *mensaje, int minimo, int maximo)
 double leer_double(const char *mensaje, double minimo, double maximo)
 {
     char buffer[TAM_BUFFER];
-    char *fin;
+    char error[TAM_ERROR];
     double valor;
-    size_t i;
 
     while (1) {
         printf("%s [%g a %g]: ", mensaje, minimo, maximo);
@@ -114,35 +174,10 @@ double leer_double(const char *mensaje, double minimo, double maximo)
             mostrar_advertencia("Entrada demasiado larga.");
             continue;
         }
-
-        /* Aceptar coma decimal: "6,5" -> "6.5" */
-        for (i = 0; buffer[i] != '\0'; i++) {
-            if (buffer[i] == ',') {
-                buffer[i] = '.';
-            }
+        if (validar_double(buffer, minimo, maximo, &valor, error, TAM_ERROR)) {
+            return valor;
         }
-
-        if (!caracteres_numericos(buffer)) {
-            mostrar_advertencia("Ingresá solo un número (ejemplo: 6.5).");
-            continue;
-        }
-
-        errno = 0;
-        valor = strtod(buffer, &fin);
-
-        if (fin == buffer || !solo_espacios(fin)) {
-            mostrar_advertencia("Ingresá un número real válido (ejemplo: 6.5).");
-            continue;
-        }
-        if (errno == ERANGE || !isfinite(valor)) {
-            mostrar_advertencia("Número fuera de rango representable.");
-            continue;
-        }
-        if (valor < minimo || valor > maximo) {
-            printf("  [!] El valor debe estar entre %g y %g.\n", minimo, maximo);
-            continue;
-        }
-        return valor;
+        mostrar_advertencia(error);
     }
 }
 

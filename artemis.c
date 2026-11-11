@@ -1,6 +1,11 @@
 /*
  * artemis.c
- * Lógica del simulador: cálculos físicos, eventos de la misión, puntaje y reportes.
+ * Lógica del simulador: física, eventos de la misión, puntaje y reportes.
+ *
+ * Organización del archivo:
+ *   1) Física                    -> cálculos puros
+ *   2) Lógica de la misión       -> la usan la consola Y la interfaz gráfica
+ *   3) Versión de consola        -> printf + teclado (no la usa la interfaz gráfica)
  */
 #include <stdio.h>
 #include <string.h>
@@ -22,7 +27,7 @@ static const char *NOMBRES_EVENTOS[NUM_EVENTOS] = {
 };
 
 /* =====================================================================
- *                           FUNCIONES DE FÍSICA
+ *                           1) FÍSICA
  * ===================================================================== */
 
 double energia_cinetica(double masa, double velocidad)
@@ -96,7 +101,133 @@ void generar_tabla_frenado(const DatosMision *d, PasoFrenado tabla[], int n)
 }
 
 /* =====================================================================
- *                        DATOS DE LA MISIÓN
+ *            2) LÓGICA DE LA MISIÓN (sin printf ni teclado)
+ * ===================================================================== */
+
+const Dificultad *obtener_dificultad(int indice)
+{
+    if (indice < 0) {
+        indice = 0;
+    }
+    if (indice >= NUM_DIFICULTADES) {
+        indice = NUM_DIFICULTADES - 1;
+    }
+    return &DIFICULTADES[indice];
+}
+
+const char *nombre_evento(int indice)
+{
+    if (indice < 0 || indice >= NUM_EVENTOS) {
+        return "";
+    }
+    return NOMBRES_EVENTOS[indice];
+}
+
+const char *nombre_estado_evento(EstadoEvento estado)
+{
+    switch (estado) {
+    case EV_SUPERADO: return "SUPERADO";
+    case EV_FALLIDO:  return "FALLIDO";
+    default:          return "no alcanzado";
+    }
+}
+
+/* Validación cruzada: que los datos tengan sentido físico entre sí. */
+int datos_coherentes(const DatosMision *d, char *mensaje, int tam)
+{
+    const char *motivo = NULL;
+
+    if (d->h_inicial <= d->h_paracaidas) {
+        motivo = "La altitud de reingreso debe ser mayor que la de los paracaídas.";
+    } else if (d->v_inicial <= d->v_paracaidas) {
+        motivo = "La velocidad de reingreso debe ser mayor que la de apertura de paracaídas.";
+    } else if (d->v_paracaidas <= d->v_impacto) {
+        motivo = "La velocidad al abrir paracaídas debe ser mayor que la de impacto.";
+    }
+
+    if (motivo != NULL) {
+        if (mensaje != NULL && tam > 0) {
+            snprintf(mensaje, (size_t)tam, "%s", motivo);
+        }
+        return 0;
+    }
+    return 1;
+}
+
+void iniciar_reporte(Reporte *rep, const Dificultad *dif)
+{
+    memset(rep, 0, sizeof *rep);
+    rep->dificultad = dif;
+}
+
+EstadoAngulo resolver_angulo(Reporte *rep, const Dificultad *dif, double gamma)
+{
+    EstadoAngulo estado = clasificar_angulo(gamma);
+
+    rep->gamma = gamma;
+    if (estado == ANGULO_SEGURO) {
+        rep->eventos[0] = EV_SUPERADO;
+    } else if (rep->correcciones_usadas >= dif->correcciones) {
+        rep->eventos[0] = EV_FALLIDO;
+    } else {
+        rep->correcciones_usadas++;
+    }
+    return estado;
+}
+
+void resolver_frenado(const DatosMision *d, const Dificultad *dif, Reporte *rep)
+{
+    rep->energia_inicial  = energia_mecanica(d->masa, d->v_inicial, d->h_inicial);
+    rep->energia_final    = energia_mecanica(d->masa, d->v_paracaidas, d->h_paracaidas);
+    rep->trabajo_roz      = calcular_trabajo_rozamiento(d);
+    rep->desaceleracion   = calcular_desaceleracion_media(d);
+    rep->desaceleracion_g = rep->desaceleracion / G_TERRESTRE;
+    generar_tabla_frenado(d, rep->tabla, NUM_PASOS_FRENADO);
+
+    rep->eventos[1] = (rep->desaceleracion_g <= dif->limite_g_frenado) ? EV_SUPERADO : EV_FALLIDO;
+}
+
+void resolver_amerizaje(const DatosMision *d, const Dificultad *dif, Reporte *rep)
+{
+    rep->fuerza_impacto  = calcular_fuerza_amerizaje(d);
+    rep->fuerza_en_pesos = rep->fuerza_impacto / (d->masa * G_TERRESTRE);
+
+    rep->eventos[2] = (rep->fuerza_en_pesos <= dif->limite_g_impacto) ? EV_SUPERADO : EV_FALLIDO;
+}
+
+void calcular_puntaje(Reporte *rep)
+{
+    int puntos = 0;
+    int superados = 0;
+
+    if (rep->eventos[0] == EV_SUPERADO) {
+        puntos += PUNTOS_EVENTO - PENALIZACION_CORR * rep->correcciones_usadas;
+        if (puntos < 0) {
+            puntos = 0;
+        }
+    }
+    if (rep->eventos[1] == EV_SUPERADO) {
+        puntos += PUNTOS_EVENTO;
+    }
+    if (rep->eventos[2] == EV_SUPERADO) {
+        puntos += PUNTOS_EVENTO;
+    }
+
+    for (int i = 0; i < NUM_EVENTOS; i++) {
+        if (rep->eventos[i] == EV_SUPERADO) {
+            superados++;
+        }
+    }
+    rep->exito = (superados == NUM_EVENTOS);
+
+    if (rep->exito && rep->correcciones_usadas == 0) {
+        puntos += BONUS_SIN_CORREC;
+    }
+    rep->puntaje = puntos;
+}
+
+/* =====================================================================
+ *        3) VERSIÓN DE CONSOLA (printf + teclado)
  * ===================================================================== */
 
 void cargar_datos_por_defecto(DatosMision *d)
@@ -111,27 +242,11 @@ void cargar_datos_por_defecto(DatosMision *d)
     d->d_hundimiento = D_HUNDIMIENTO;
 }
 
-/* Validación cruzada: que los datos tengan sentido físico entre sí. */
-static int datos_coherentes(const DatosMision *d)
-{
-    if (d->h_inicial <= d->h_paracaidas) {
-        mostrar_advertencia("La altitud de reingreso debe ser mayor que la de los paracaídas.");
-        return 0;
-    }
-    if (d->v_inicial <= d->v_paracaidas) {
-        mostrar_advertencia("La velocidad de reingreso debe ser mayor que la de apertura de paracaídas.");
-        return 0;
-    }
-    if (d->v_paracaidas <= d->v_impacto) {
-        mostrar_advertencia("La velocidad al abrir paracaídas debe ser mayor que la de impacto.");
-        return 0;
-    }
-    return 1;
-}
-
 void ingresar_datos_mision(DatosMision *d)
 {
-    do {
+    char mensaje[TAM_MENSAJE];
+
+    while (1) {
         puts("\n--- Ingreso de datos de la misión ---");
         d->masa          = leer_double("Masa de la cápsula (kg)",            1000.0, 50000.0);
         d->v_inicial     = leer_double("Velocidad de reingreso (m/s)",        100.0, 15000.0);
@@ -141,7 +256,12 @@ void ingresar_datos_mision(DatosMision *d)
         d->v_impacto     = leer_double("Velocidad de impacto (m/s)",            0.5, 30.0);
         d->dt_frenado    = leer_double("Duración del frenado máximo (s)",      10.0, 2000.0);
         d->d_hundimiento = leer_double("Hundimiento en el agua (m)",            0.1, 10.0);
-    } while (!datos_coherentes(d));
+
+        if (datos_coherentes(d, mensaje, TAM_MENSAJE)) {
+            return;
+        }
+        mostrar_advertencia(mensaje);
+    }
 }
 
 const Dificultad *seleccionar_dificultad(void)
@@ -157,19 +277,6 @@ const Dificultad *seleccionar_dificultad(void)
     int opcion = leer_entero("Elegí la dificultad", 1, NUM_DIFICULTADES);
 
     return &DIFICULTADES[opcion - 1];
-}
-
-/* =====================================================================
- *                         CICLO DE LA MISIÓN
- * ===================================================================== */
-
-static const char *nombre_estado(EstadoEvento e)
-{
-    switch (e) {
-    case EV_SUPERADO: return "SUPERADO";
-    case EV_FALLIDO:  return "FALLIDO";
-    default:          return "no alcanzado";
-    }
 }
 
 static void explicar_angulo(EstadoAngulo estado)
@@ -199,43 +306,12 @@ static void mostrar_tabla_frenado(const PasoFrenado tabla[], int n)
     }
 }
 
-static void calcular_puntaje(Reporte *r)
-{
-    int puntos = 0;
-    int superados = 0;
-
-    if (r->eventos[0] == EV_SUPERADO) {
-        puntos += PUNTOS_EVENTO - PENALIZACION_CORR * r->correcciones_usadas;
-        if (puntos < 0) {
-            puntos = 0;
-        }
-    }
-    if (r->eventos[1] == EV_SUPERADO) {
-        puntos += PUNTOS_EVENTO;
-    }
-    if (r->eventos[2] == EV_SUPERADO) {
-        puntos += PUNTOS_EVENTO;
-    }
-
-    for (int i = 0; i < NUM_EVENTOS; i++) {
-        if (r->eventos[i] == EV_SUPERADO) {
-            superados++;
-        }
-    }
-    r->exito = (superados == NUM_EVENTOS);
-
-    if (r->exito && r->correcciones_usadas == 0) {
-        puntos += BONUS_SIN_CORREC;
-    }
-    r->puntaje = puntos;
-}
-
 void ejecutar_mision(const DatosMision *d, const Dificultad *dif, Reporte *rep)
 {
     EstadoAngulo estado;
+    double gamma;
 
-    memset(rep, 0, sizeof *rep);
-    rep->dificultad = dif;
+    iniciar_reporte(rep, dif);
 
     /* ---------- EVENTO 1: ventana de reingreso ---------- */
     printf("\n===== EVENTO 1: %s =====\n", NOMBRES_EVENTOS[0]);
@@ -243,17 +319,13 @@ void ejecutar_mision(const DatosMision *d, const Dificultad *dif, Reporte *rep)
            GAMMA_MIN, GAMMA_MAX, dif->correcciones);
 
     while (rep->eventos[0] == EV_PENDIENTE) {
-        rep->gamma = leer_double("Ángulo de reingreso gamma (grados)", 0.0, 90.0);
-        estado = clasificar_angulo(rep->gamma);
+        gamma  = leer_double("Ángulo de reingreso gamma (grados)", 0.0, 90.0);
+        estado = resolver_angulo(rep, dif, gamma);
         explicar_angulo(estado);
 
-        if (estado == ANGULO_SEGURO) {
-            rep->eventos[0] = EV_SUPERADO;
-        } else if (rep->correcciones_usadas >= dif->correcciones) {
+        if (rep->eventos[0] == EV_FALLIDO) {
             puts("  Sin propelente para más correcciones: SE PIERDE LA MISIÓN.");
-            rep->eventos[0] = EV_FALLIDO;
-        } else {
-            rep->correcciones_usadas++;
+        } else if (estado != ANGULO_SEGURO) {
             printf("  Corrección usada (%d/%d). Probá con otro ángulo.\n",
                    rep->correcciones_usadas, dif->correcciones);
         }
@@ -265,24 +337,17 @@ void ejecutar_mision(const DatosMision *d, const Dificultad *dif, Reporte *rep)
 
     /* ---------- EVENTO 2: frenado aerodinámico ---------- */
     printf("\n===== EVENTO 2: %s =====\n", NOMBRES_EVENTOS[1]);
-    rep->energia_inicial   = energia_mecanica(d->masa, d->v_inicial, d->h_inicial);
-    rep->energia_final     = energia_mecanica(d->masa, d->v_paracaidas, d->h_paracaidas);
-    rep->trabajo_roz       = calcular_trabajo_rozamiento(d);
-    rep->desaceleracion    = calcular_desaceleracion_media(d);
-    rep->desaceleracion_g  = rep->desaceleracion / G_TERRESTRE;
-    generar_tabla_frenado(d, rep->tabla, NUM_PASOS_FRENADO);
+    resolver_frenado(d, dif, rep);
 
     mostrar_tabla_frenado(rep->tabla, TAM_TABLA);
     printf("\n  Trabajo del rozamiento : %.4e J\n", rep->trabajo_roz);
     printf("  Desaceleración media   : %.2f m/s^2 = %.2f g  (límite %.1f g)\n",
            rep->desaceleracion, rep->desaceleracion_g, dif->limite_g_frenado);
 
-    if (rep->desaceleracion_g <= dif->limite_g_frenado) {
+    if (rep->eventos[1] == EV_SUPERADO) {
         puts("  -> La tripulación soporta el frenado. EVENTO SUPERADO.");
-        rep->eventos[1] = EV_SUPERADO;
     } else {
         puts("  -> Carga de g excesiva para la tripulación. EVENTO FALLIDO.");
-        rep->eventos[1] = EV_FALLIDO;
         calcular_puntaje(rep);
         return;
     }
@@ -292,26 +357,19 @@ void ejecutar_mision(const DatosMision *d, const Dificultad *dif, Reporte *rep)
     printf("  Paracaídas abiertos a %.1f m con %.1f m/s. Impacto a %.1f m/s, hundimiento %.2f m.\n",
            d->h_paracaidas, d->v_paracaidas, d->v_impacto, d->d_hundimiento);
 
-    rep->fuerza_impacto  = calcular_fuerza_amerizaje(d);
-    rep->fuerza_en_pesos = rep->fuerza_impacto / (d->masa * G_TERRESTRE);
+    resolver_amerizaje(d, dif, rep);
 
     printf("  Fuerza promedio del agua: %.1f N = %.2f veces el peso (límite %.1fx)\n",
            rep->fuerza_impacto, rep->fuerza_en_pesos, dif->limite_g_impacto);
 
-    if (rep->fuerza_en_pesos <= dif->limite_g_impacto) {
+    if (rep->eventos[2] == EV_SUPERADO) {
         puts("  -> La estructura resiste el amerizaje. EVENTO SUPERADO.");
-        rep->eventos[2] = EV_SUPERADO;
     } else {
         puts("  -> La estructura no resiste el impacto. EVENTO FALLIDO.");
-        rep->eventos[2] = EV_FALLIDO;
     }
 
     calcular_puntaje(rep);
 }
-
-/* =====================================================================
- *                        PANTALLAS Y REPORTES
- * ===================================================================== */
 
 void mostrar_reglas(void)
 {
@@ -391,7 +449,7 @@ void mostrar_reporte(const Reporte *r)
     printf("Correcciones usadas  : %d de %d\n", r->correcciones_usadas, r->dificultad->correcciones);
 
     for (int i = 0; i < NUM_EVENTOS; i++) {
-        printf("Evento %d (%s): %s\n", i + 1, NOMBRES_EVENTOS[i], nombre_estado(r->eventos[i]));
+        printf("Evento %d (%s): %s\n", i + 1, nombre_evento(i), nombre_estado_evento(r->eventos[i]));
     }
 
     if (r->eventos[1] != EV_PENDIENTE) {

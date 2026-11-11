@@ -1,3 +1,4 @@
 *.o
 artemis
+artemis_gui.exe
 artemis.exe

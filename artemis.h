@@ -2,6 +2,10 @@
  * artemis.h
  * Situación-Problema 4: Reingreso atmosférico, frenado aerodinámico y amerizaje.
  * Contiene: constantes, tipos de datos y prototipos de funciones públicas.
+ *
+ * Las funciones de la sección "LÓGICA DE LA MISIÓN" NO imprimen ni leen teclado:
+ * reciben datos y devuelven resultados. Por eso las usan tanto la versión de
+ * consola como la interfaz gráfica.
  */
 #ifndef ARTEMIS_H
 #define ARTEMIS_H
@@ -29,6 +33,7 @@
 #define PUNTOS_EVENTO      300
 #define PENALIZACION_CORR  100
 #define BONUS_SIN_CORREC   100
+#define TAM_MENSAJE        128       /* largo máximo de un mensaje de error */
 
 /* ========================== TIPOS DE DATOS ========================== */
 
@@ -53,7 +58,7 @@ typedef enum {
 
 /* Estado de cada evento de la misión. */
 typedef enum {
-    EV_PENDIENTE,           /* no se llegó a jugar */
+    EV_PENDIENTE,           /* todavía no se jugó */
     EV_SUPERADO,
     EV_FALLIDO
 } EstadoEvento;
@@ -105,13 +110,35 @@ double calcular_fuerza_amerizaje(const DatosMision *d);
 EstadoAngulo clasificar_angulo(double gamma);
 void generar_tabla_frenado(const DatosMision *d, PasoFrenado tabla[], int n);
 
-/* ======================= FUNCIONES DE JUEGO ======================= */
+/* ============ LÓGICA DE LA MISIÓN (sin printf ni teclado) ============ */
+const Dificultad *obtener_dificultad(int indice);      /* 0 .. NUM_DIFICULTADES-1 */
+const char *nombre_evento(int indice);                 /* 0 .. NUM_EVENTOS-1      */
+const char *nombre_estado_evento(EstadoEvento estado);
+
+/* Devuelve 1 si los datos son coherentes entre sí. Si no, devuelve 0 y deja
+ * el motivo en 'mensaje' (en vez de imprimirlo). */
+int datos_coherentes(const DatosMision *d, char *mensaje, int tam);
+
+void iniciar_reporte(Reporte *rep, const Dificultad *dif);
+
+/* Evento 1: evalúa el ángulo. Actualiza rep->gamma, las correcciones usadas y
+ * rep->eventos[0] (SUPERADO si es seguro, FALLIDO si no quedan correcciones). */
+EstadoAngulo resolver_angulo(Reporte *rep, const Dificultad *dif, double gamma);
+
+/* Evento 2: calcula trabajo, desaceleración y tabla. Marca rep->eventos[1]. */
+void resolver_frenado(const DatosMision *d, const Dificultad *dif, Reporte *rep);
+
+/* Evento 3: calcula la fuerza de amerizaje. Marca rep->eventos[2]. */
+void resolver_amerizaje(const DatosMision *d, const Dificultad *dif, Reporte *rep);
+
+/* Calcula puntaje y resultado final (rep->puntaje, rep->exito). */
+void calcular_puntaje(Reporte *rep);
+
+/* ================= VERSIÓN DE CONSOLA (usa printf y teclado) ================= */
 void cargar_datos_por_defecto(DatosMision *d);
 void ingresar_datos_mision(DatosMision *d);
 const Dificultad *seleccionar_dificultad(void);
 void ejecutar_mision(const DatosMision *d, const Dificultad *dif, Reporte *rep);
-
-/* ========================= PANTALLAS / REPORTES ========================= */
 void mostrar_reglas(void);
 void mostrar_datos(const DatosMision *d);
 void mostrar_analisis(const DatosMision *d, double gamma);
