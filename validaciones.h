@@ -1,10 +1,22 @@
 /*
  * validaciones.h
- * Funciones de ingreso seguro por consola y mensajes de advertencia.
- * Ninguna función de este módulo devuelve hasta que el dato sea válido.
+ * Validación de datos ingresados por el usuario.
+ *
+ *  - validar_double(): revisa un TEXTO ya escrito (lo usa la interfaz gráfica
+ *    con los cuadros de texto). No espera nada del teclado.
+ *  - leer_*(): versión de consola. Piden el dato y repiten hasta que sea válido.
  */
 #ifndef VALIDACIONES_H
 #define VALIDACIONES_H
+
+/*
+ * Valida que 'texto' sea un número real dentro de [minimo, maximo].
+ * Acepta "6.5" y "6,5". Devuelve 1 si es válido y deja el valor en *salida.
+ * Si no es válido devuelve 0 y escribe el motivo en 'error' (hasta tam_error
+ * caracteres). 'error' puede ser NULL si no interesa el motivo.
+ */
+int validar_double(const char *texto, double minimo, double maximo,
+                   double *salida, char *error, int tam_error);
 
 /* Lee un entero en el rango [minimo, maximo]. Repite hasta que sea válido. */
 int leer_entero(const char *mensaje, int minimo, int maximo);
@@ -22,7 +34,7 @@ void mostrar_advertencia(const char *texto);
 /* Espera que el usuario presione ENTER. */
 void pausar(void);
 
-/* Borra la pantalla de la consola. */
+/* Borra la pantalla de la consola (solo versión de consola). */
 void limpiar_pantalla(void);
 
 #endif /* VALIDACIONES_H */
