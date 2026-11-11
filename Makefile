@@ -18,7 +18,7 @@ endif
 
 # En Windows (MSYS2) las librerias graficas son distintas que en Linux
 ifneq ($(strip $(OS)$(MSYSTEM)),)
-    LIBS_GUI = -lraylib -lopengl32 -lgdi32 -lwinmm -lm
+    LIBS_GUI = -lraylib -lglfw3 -lopengl32 -lgdi32 -lwinmm -limm32 -lole32 -luuid -lm
     EXE      = .exe
 else
     LIBS_GUI = -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
