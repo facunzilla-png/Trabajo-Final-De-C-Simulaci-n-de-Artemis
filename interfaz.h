@@ -40,10 +40,12 @@ typedef struct {
     Reporte reporte;                /* resultados de la misión en curso */
     int hay_reporte;                /* 1 = hay al menos una misión terminada */
 
-    float gamma;                    /* ángulo elegido en el evento 1 */
-    float gamma_analisis;           /* ángulo elegido en la pantalla de análisis */
-    EstadoAngulo ultimo_angulo;     /* resultado del último intento de ángulo */
-    int hubo_intento;               /* 1 = ya se confirmó algún ángulo */
+    float gamma;                    
+    float gamma_analisis;
+    float gamma_calculado;          
+    int analisis_calculado;          
+    EstadoAngulo ultimo_angulo;     
+    int hubo_intento;               
 
     char campos[NUM_CAMPOS][TAM_CAMPO];  /* texto de los cuadros de configuración */
     int campo_activo;                    /* cuadro que se está editando (-1 = ninguno) */
