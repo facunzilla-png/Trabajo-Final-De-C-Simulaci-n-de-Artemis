@@ -247,7 +247,7 @@ make clean
 
   ```bash
 
-  gcc -std=c99 -Wall -Wextra -I. main.c interfaz.c artemis.c validaciones.c -o artemis_gui.exe -lraylib -lopengl32 -lgdi32 -lwinmm -lm
+  gcc -std=c99 -Wall -Wextra -I. main.c interfaz.c artemis.c validaciones.c -o artemis.exe -lraylib -lopengl32 -lgdi32 -lwinmm -lm
 
   ```
 
@@ -255,7 +255,7 @@ make clean
 
   ```bash
 
-  gcc -std=c99 -Wall -Wextra -I. main.c interfaz.c artemis.c validaciones.c -o artemis_gui -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
+  gcc -std=c99 -Wall -Wextra -I. main.c interfaz.c artemis.c validaciones.c -o artemis -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
 
   ```
 
@@ -269,7 +269,7 @@ Una vez compilado, iniciar el simulador ejecutando:
 
   ```bash
 
-  ./artemis_gui.exe
+  ./artemis.exe
 
   ```
 
@@ -277,7 +277,7 @@ Una vez compilado, iniciar el simulador ejecutando:
 
   ```bash
 
-  ./artemis_gui
+  ./artemis
 
   ```
 
