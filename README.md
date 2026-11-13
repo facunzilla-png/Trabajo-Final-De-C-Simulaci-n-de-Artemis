@@ -4,21 +4,12 @@
 
 ## a) Integrantes y Comisión
 
-
-
 | Integrante | Comisión |
-
 | :--- | :--- |
-
 | **Borges, Facundo** | K 1.1 |
-
 | **Contreras, Santiago** | K 1.1 |
-
 | **Dabski, Santiago** | K 1.1 |
-
 | **Retamozo, Kevin** | K 1.1 |
-
-
 
 ---
 
