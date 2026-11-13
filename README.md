@@ -12,7 +12,8 @@
 | **Retamozo, Kevin** | K 1.1 |
 
 Aclaración: La mayoria de commits estan hechos desde la cuenta facunzilla-png ya que el equipo se reunio en la casa de este usuario para realizar el trabajo; Borges, Facundo lo revisaba y lo subia.
-Aclaración 2: Había una versión de consola pero fue removida
+Aclaración 2: Había una versión de consola pero fue removida.
+Aclaración 3: Borges, Facundo es humano y puede ser que se haya olvidado subir algunos archivos y haya tenido que subirlos juntos en el mismo commit evidenciado en algunos commits.
 
 ---
 
