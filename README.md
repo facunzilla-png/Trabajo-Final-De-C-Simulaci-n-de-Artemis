@@ -121,7 +121,7 @@ El sistema fue diseñado en lenguaje C (estándar C99) siguiendo una arquitectur
 
   * `validaciones.h` y `validaciones.c`: Módulo de validación de datos encargado de verificar rangos numéricos mediante `strtod()` (aceptando punto o coma decimal indistintamente) y realizar la validación física cruzada (`datos_coherentes`) para asegurar que los parámetros personalizados ingresados por el usuario tengan coherencia entre etapas.
 
-  * `main.c`, `interfaz.h` e `interfaz.c`: Implementan la aplicación gráfica completa mediante una máquina de estados finitos (`struct Juego` y `enum Pantalla`) que corre a 60 FPS sobre `raylib` + `raygui`. Incluye ilustraciones vectoriales animadas, un laboratorio interactivo de análisis físico y las pantallas interactivas de los tres minijuegos con telemetría.
+  * `main.c`, `interfaz.h` e `interfaz.c`: Implementan la aplicación gráfica completa mediante una máquina de estados finitos (`struct Juego` y `enum Pantalla`) que corre a 60 FPS sobre `raylib` + `raygui`. Incluye ilustraciones vectoriales animadas, un laboratorio interactivo de análisis físico y las pantallas interactivas de los tres minijuegos.
 
 
 
