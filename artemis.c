@@ -1,34 +1,30 @@
-/*
- * artemis.c
- * Lógica del simulador: física, eventos de la misión, puntaje y reportes.
- *
- * Organización del archivo:
- *   1) Física                    -> cálculos puros
- *   2) Lógica de la misión       -> la usan la consola Y la interfaz gráfica
- *   3) Versión de consola        -> printf + teclado (no la usa la interfaz gráfica)
- */
+
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include "artemis.h"
 #include "validaciones.h"
 
-/* ---------- Tablas constantes (arreglos) ---------- */
 static const Dificultad DIFICULTADES[NUM_DIFICULTADES] = {
-    /* nombre     g frenado  g impacto  correcciones */
-    { "Fácil",    5.0,       5.0,       3 },
-    { "Normal",   3.0,       3.5,       2 },
-    { "Difícil",  2.5,       3.0,       1 }
+    { "Fácil",    5.0,       5.0,       8,   4,      0.20 },
+    { "Normal",   3.0,       3.5,       6,   4,      0.30 },
+    { "Difícil",  2.5,       3.0,       5,   4,      0.40 }
+};
+
+static const char *NOMBRES_MANIOBRAS[] = {
+    "",                                 
+    "Pulso suave",
+    "Pulso fuerte",
+    "Mantener actitud"
 };
 
 static const char *NOMBRES_EVENTOS[NUM_EVENTOS] = {
-    "Ventana de reingreso",
+    "Alineación de reingreso con RCS",
     "Frenado aerodinámico",
     "Paracaídas y amerizaje"
 };
 
-/* =====================================================================
- *                           1) FÍSICA
- * ===================================================================== */
 
 double energia_cinetica(double masa, double velocidad)
 {
@@ -45,10 +41,6 @@ double energia_mecanica(double masa, double velocidad, double altura)
     return energia_cinetica(masa, velocidad) + energia_potencial(masa, altura);
 }
 
-/*
- * Teorema trabajo-energía: W_no_conservativas = Em_final - Em_inicial
- * Acá la única fuerza no conservativa es el rozamiento del aire (W < 0).
- */
 double calcular_trabajo_rozamiento(const DatosMision *d)
 {
     double e_inicial = energia_mecanica(d->masa, d->v_inicial, d->h_inicial);
@@ -57,18 +49,12 @@ double calcular_trabajo_rozamiento(const DatosMision *d)
     return e_final - e_inicial;
 }
 
-/* Desaceleración media = variación de velocidad / tiempo (valor positivo). */
+
 double calcular_desaceleracion_media(const DatosMision *d)
 {
     return (d->v_inicial - d->v_paracaidas) / d->dt_frenado;
 }
 
-/*
- * Amerizaje: la cápsula frena de v_impacto a 0 recorriendo d_hundimiento.
- * Trabajo neto = variación de energía cinética:
- *      (m*g - F) * d = 0 - (1/2)*m*v^2   ->   F = m * (g + v^2 / (2*d))
- * (se desprecia el empuje del agua / flotación)
- */
 double calcular_fuerza_amerizaje(const DatosMision *d)
 {
     double v2 = d->v_impacto * d->v_impacto;
@@ -87,7 +73,29 @@ EstadoAngulo clasificar_angulo(double gamma)
     return ANGULO_SEGURO;
 }
 
-/* Velocidad en cada instante suponiendo desaceleración media constante. */
+static double aleatorio_entre(double minimo, double maximo)
+{
+    return minimo + (maximo - minimo) * ((double)rand() / RAND_MAX);
+}
+
+
+double generar_gamma_inicial(void)
+{
+    double g;
+
+    if (rand() % 2 == 0) {
+        g = aleatorio_entre(GAMMA_INI_BAJO_MIN, GAMMA_INI_BAJO_MAX);
+    } else {
+        g = aleatorio_entre(GAMMA_INI_ALTO_MIN, GAMMA_INI_ALTO_MAX);
+    }
+    return round(g * 10.0) / 10.0;
+}
+
+double generar_deriva(double deriva_max)
+{
+    return aleatorio_entre(-deriva_max, deriva_max);
+}
+
 void generar_tabla_frenado(const DatosMision *d, PasoFrenado tabla[], int n)
 {
     double a    = calcular_desaceleracion_media(d);
@@ -100,10 +108,7 @@ void generar_tabla_frenado(const DatosMision *d, PasoFrenado tabla[], int n)
     }
 }
 
-/* =====================================================================
- *            2) LÓGICA DE LA MISIÓN (sin printf ni teclado)
- * ===================================================================== */
-
+//logica de la mision//
 const Dificultad *obtener_dificultad(int indice)
 {
     if (indice < 0) {
@@ -132,6 +137,14 @@ const char *nombre_estado_evento(EstadoEvento estado)
     }
 }
 
+const char *nombre_maniobra(TipoManiobra m)
+{
+    if (m < MANIOBRA_SUAVE || m > MANIOBRA_MANTENER) {
+        return "-";
+    }
+    return NOMBRES_MANIOBRAS[m];
+}
+
 /* Validación cruzada: que los datos tengan sentido físico entre sí. */
 int datos_coherentes(const DatosMision *d, char *mensaje, int tam)
 {
@@ -157,22 +170,69 @@ int datos_coherentes(const DatosMision *d, char *mensaje, int tam)
 void iniciar_reporte(Reporte *rep, const Dificultad *dif)
 {
     memset(rep, 0, sizeof *rep);
-    rep->dificultad = dif;
+    rep->dificultad      = dif;
+    rep->gamma_inicial   = generar_gamma_inicial();
+    rep->gamma           = rep->gamma_inicial;
+    /* Empieza con una leve deriva rotacional hacia afuera de la ventana */
+    rep->omega           = (rep->gamma_inicial < GAMMA_MIN) ? -0.20 : +0.20;
+    rep->deriva_proxima  = round(generar_deriva(dif->deriva_max) * 100.0) / 100.0;
+    rep->rcs_recalentado = 0;
 }
 
-EstadoAngulo resolver_angulo(Reporte *rep, const Dificultad *dif, double gamma)
+void aplicar_turno_rcs(Reporte *rep, TipoManiobra m, int direccion)
 {
-    EstadoAngulo estado = clasificar_angulo(gamma);
-
-    rep->gamma = gamma;
-    if (estado == ANGULO_SEGURO) {
-        rep->eventos[0] = EV_SUPERADO;
-    } else if (rep->correcciones_usadas >= dif->correcciones) {
-        rep->eventos[0] = EV_FALLIDO;
-    } else {
-        rep->correcciones_usadas++;
+    const Dificultad *dif = rep->dificultad;
+    if (rep->num_turnos >= dif->turnos_rcs) {
+        return;
     }
-    return estado;
+
+    TurnoRCS *turno = &rep->bitacora[rep->num_turnos];
+    int rcs_disp = dif->combustible_rcs - rep->rcs_usado;
+    double delta = 0.0;
+    int costo = 0;
+
+    if (m == MANIOBRA_SUAVE && rcs_disp >= COSTO_SUAVE) {
+        delta = direccion * PULSO_SUAVE;
+        costo = COSTO_SUAVE;
+        rep->rcs_recalentado = 0;
+    } else if (m == MANIOBRA_FUERTE && rcs_disp >= COSTO_FUERTE && !rep->rcs_recalentado) {
+        delta = direccion * PULSO_FUERTE;
+        costo = COSTO_FUERTE;
+        rep->rcs_recalentado = 1; /* bloquea el pulso fuerte en el próximo turno */
+    } else {
+        m = MANIOBRA_MANTENER;
+        rep->rcs_recalentado = 0;
+    }
+
+    rep->rcs_usado += costo;
+    turno->t           = dif->turnos_rcs - rep->num_turnos;
+    turno->maniobra    = m;
+    turno->delta_pulso = delta;
+    turno->deriva      = rep->deriva_proxima;
+
+    /* 1.ª Ley de Newton: el pulso y la anomalía cambian la velocidad angular (omega),
+     * y el ángulo gamma avanza según esa velocidad angular acumulada. */
+    rep->omega += delta + turno->deriva;
+    rep->gamma += rep->omega;
+    if (rep->gamma < 0.5) {
+        rep->gamma = 0.5;
+    } else if (rep->gamma > 14.5) {
+        rep->gamma = 14.5;
+    }
+
+    turno->omega_resultante = rep->omega;
+    turno->gamma_resultante = rep->gamma;
+    turno->rcs_restante     = dif->combustible_rcs - rep->rcs_usado;
+    rep->num_turnos++;
+
+    /* Pronóstico del radar para el próximo turno */
+    rep->deriva_proxima = round(generar_deriva(dif->deriva_max) * 100.0) / 100.0;
+
+    if (rep->num_turnos >= dif->turnos_rcs) {
+        int angulo_ok = (clasificar_angulo(rep->gamma) == ANGULO_SEGURO);
+        int giro_ok   = (fabs(rep->omega) <= OMEGA_MAX_SEGURO);
+        rep->eventos[0] = (angulo_ok && giro_ok) ? EV_SUPERADO : EV_FALLIDO;
+    }
 }
 
 void resolver_frenado(const DatosMision *d, const Dificultad *dif, Reporte *rep)
@@ -195,41 +255,38 @@ void resolver_amerizaje(const DatosMision *d, const Dificultad *dif, Reporte *re
     rep->eventos[2] = (rep->fuerza_en_pesos <= dif->limite_g_impacto) ? EV_SUPERADO : EV_FALLIDO;
 }
 
-void calcular_puntaje(Reporte *rep)
+void calcular_puntaje(Reporte *r)
 {
     int puntos = 0;
     int superados = 0;
 
-    if (rep->eventos[0] == EV_SUPERADO) {
-        puntos += PUNTOS_EVENTO - PENALIZACION_CORR * rep->correcciones_usadas;
+    if (r->eventos[0] == EV_SUPERADO) {
+        puntos += PUNTOS_EVENTO - PENALIZACION_RCS * r->rcs_usado;
         if (puntos < 0) {
             puntos = 0;
         }
     }
-    if (rep->eventos[1] == EV_SUPERADO) {
+    if (r->eventos[1] == EV_SUPERADO) {
         puntos += PUNTOS_EVENTO;
     }
-    if (rep->eventos[2] == EV_SUPERADO) {
+    if (r->eventos[2] == EV_SUPERADO) {
         puntos += PUNTOS_EVENTO;
     }
 
     for (int i = 0; i < NUM_EVENTOS; i++) {
-        if (rep->eventos[i] == EV_SUPERADO) {
+        if (r->eventos[i] == EV_SUPERADO) {
             superados++;
         }
     }
-    rep->exito = (superados == NUM_EVENTOS);
+    r->exito = (superados == NUM_EVENTOS);
 
-    if (rep->exito && rep->correcciones_usadas == 0) {
-        puntos += BONUS_SIN_CORREC;
+    if (r->exito && fabs(r->gamma - GAMMA_CENTRO) <= TOLERANCIA_BONUS) {
+        puntos += BONUS_PRECISION;
     }
-    rep->puntaje = puntos;
+    r->puntaje = puntos;
 }
 
-/* =====================================================================
- *        3) VERSIÓN DE CONSOLA (printf + teclado)
- * ===================================================================== */
-
+//version de consola//
 void cargar_datos_por_defecto(DatosMision *d)
 {
     d->masa          = MASA_CAPSULA;
@@ -268,11 +325,14 @@ const Dificultad *seleccionar_dificultad(void)
 {
     puts("\n--- Dificultad ---");
     for (int i = 0; i < NUM_DIFICULTADES; i++) {
-        printf("  %d) %s | máx. %.1f g en frenado | máx. %.1fx peso en impacto | correcciones: %d\n",
+        printf("  %d) %s | máx. %.1f g en frenado | máx. %.1fx peso en impacto\n"
+               "     RCS: %d u. | turnos de alineación: %d | deriva: ±%.2f°/turno\n",
                i + 1, DIFICULTADES[i].nombre,
                DIFICULTADES[i].limite_g_frenado,
                DIFICULTADES[i].limite_g_impacto,
-               DIFICULTADES[i].correcciones);
+               DIFICULTADES[i].combustible_rcs,
+               DIFICULTADES[i].turnos_rcs,
+               DIFICULTADES[i].deriva_max);
     }
     int opcion = leer_entero("Elegí la dificultad", 1, NUM_DIFICULTADES);
 
@@ -306,30 +366,160 @@ static void mostrar_tabla_frenado(const PasoFrenado tabla[], int n)
     }
 }
 
+/* ---------------- Minijuego del Evento 1: alineación con RCS ---------------- */
+
+static void mostrar_indicador_gamma(double gamma)
+{
+    double paso = (INDICADOR_MAX - INDICADOR_MIN) / (INDICADOR_ANCHO - 1);
+    int pos = (int)round((gamma - INDICADOR_MIN) / paso);
+    int i;
+
+    if (pos < 0) {
+        pos = 0;
+    } else if (pos > INDICADOR_ANCHO - 1) {
+        pos = INDICADOR_ANCHO - 1;
+    }
+
+    printf("    ");
+    for (i = 0; i < pos; i++) {
+        putchar(' ');
+    }
+    puts("v");
+
+    printf("    ");
+    for (i = 0; i < INDICADOR_ANCHO; i++) {
+        double g = INDICADOR_MIN + paso * i;
+        putchar((g >= GAMMA_MIN - 1e-9 && g <= GAMMA_MAX + 1e-9) ? '=' : '-');
+    }
+    putchar('\n');
+    printf("    %.0f°%*s%.0f°\n", INDICADOR_MIN, INDICADOR_ANCHO - 5, "", INDICADOR_MAX);
+    printf("    (ventana segura '=': %.1f° a %.1f°)\n", GAMMA_MIN, GAMMA_MAX);
+}
+
+static TipoManiobra elegir_maniobra(int rcs)
+{
+    TipoManiobra m;
+
+    puts("\n  Propulsores disponibles:");
+    printf("    1) Pulso suave  prógrado/retrógrado (±%.1f°, gasta %d RCS)\n",
+           PULSO_SUAVE, COSTO_SUAVE);
+    printf("    2) Pulso fuerte prógrado/retrógrado (±%.1f°, gasta %d RCS)\n",
+           PULSO_FUERTE, COSTO_FUERTE);
+    puts("    3) Mantener actitud (0°, gasta 0 RCS, solo actúa la deriva)");
+
+    while (1) {
+        m = (TipoManiobra)leer_entero("  Elegí la maniobra", 1, 3);
+        if (m == MANIOBRA_SUAVE && rcs < COSTO_SUAVE) {
+            mostrar_advertencia("No queda RCS para un pulso suave.");
+        } else if (m == MANIOBRA_FUERTE && rcs < COSTO_FUERTE) {
+            mostrar_advertencia("No alcanza el RCS para un pulso fuerte.");
+        } else {
+            return m;
+        }
+    }
+}
+
+static double pedir_direccion(double magnitud)
+{
+    puts("    p = prógrado  (aplana la trayectoria, gamma baja)");
+    puts("    r = retrógrado (empina la trayectoria, gamma sube)");
+    if (leer_caracter("  Dirección del pulso", "pr") == 'p') {
+        return -magnitud;
+    }
+    return magnitud;
+}
+
+static EstadoAngulo minijuego_alineacion_rcs(const Dificultad *dif, Reporte *rep)
+{
+    printf("Telemetría: la nave se aproxima con gamma = %.2f° y giro omega = %+.2f°/turno.\n",
+           rep->gamma, rep->omega);
+    printf("Objetivo en t = 0: ángulo entre %.1f° y %.1f° Y giro estabilizado (|omega| <= %.2f°/t).\n",
+           GAMMA_MIN, GAMMA_MAX, OMEGA_MAX_SEGURO);
+
+    while (rep->num_turnos < dif->turnos_rcs) {
+        int t = dif->turnos_rcs - rep->num_turnos;
+        int rcs = dif->combustible_rcs - rep->rcs_usado;
+        TipoManiobra m = MANIOBRA_MANTENER;
+        int dir = 0;
+
+        printf("\n----------- T-%d turno%s para el borde atmosférico -----------\n",
+               t, t == 1 ? "" : "s");
+        printf("  Ángulo actual gamma : %.2f°  |  Velocidad de giro (omega): %+.2f°/turno\n",
+               rep->gamma, rep->omega);
+        printf("  [RADAR] Anomalía detectada para este turno: %+.2f°/turno\n",
+               rep->deriva_proxima);
+        printf("  Proyección sin tocar propulsores -> omega: %+.2f°/t | gamma: %.2f°\n",
+               rep->omega + rep->deriva_proxima,
+               rep->gamma + rep->omega + rep->deriva_proxima);
+        printf("  Combustible RCS     : %d / %d u.%s\n", rcs, dif->combustible_rcs,
+               rep->rcs_recalentado ? "  [!] TOBERAS CALIENTES (Pulso fuerte bloqueado)" : "");
+        mostrar_indicador_gamma(rep->gamma);
+
+        if (rcs == 0) {
+            puts("\n  Sin combustible RCS: la nave mantiene actitud por inercia.");
+        } else {
+            while (1) {
+                m = elegir_maniobra(rcs);
+                if (m == MANIOBRA_FUERTE && rep->rcs_recalentado) {
+                    mostrar_advertencia("Toberas recalentadas por el turno anterior: usá pulso suave o mantener.");
+                } else {
+                    break;
+                }
+            }
+            if (m != MANIOBRA_MANTENER) {
+                dir = (pedir_direccion(1.0) < 0.0) ? -1 : +1;
+            }
+        }
+
+        aplicar_turno_rcs(rep, m, dir);
+        const TurnoRCS *ult = &rep->bitacora[rep->num_turnos - 1];
+        printf("\n  %s (%+.2f°/t) + Radar (%+.2f°/t) -> Giro omega = %+.2f°/t | Nuevo gamma = %.2f°\n",
+               NOMBRES_MANIOBRAS[ult->maniobra], ult->delta_pulso,
+               ult->deriva, ult->omega_resultante, ult->gamma_resultante);
+    }
+
+    printf("\n=========== t = 0: INTERFAZ ATMOSFÉRICA ===========\n");
+    printf("  Ángulo final: %.2f°  |  Giro residual: %+.2f°/t  |  RCS usado: %d u.\n",
+           rep->gamma, rep->omega, rep->rcs_usado);
+    mostrar_indicador_gamma(rep->gamma);
+    return clasificar_angulo(rep->gamma);
+}
+
+static void mostrar_bitacora_rcs(const Reporte *r)
+{
+    puts("\n  Bitácora de alineación RCS:");
+    puts("    Turno  Maniobra            Pulso    Radar    Omega    Gamma    RCS");
+    puts("    -------------------------------------------------------------------");
+    printf("    inicio %-18s %7s  %7s  %7s  %6.2f°  %3d\n",
+           "-", "-", "-", "-", r->gamma_inicial, r->dificultad->combustible_rcs);
+    for (int i = 0; i < r->num_turnos; i++) {
+        const TurnoRCS *tr = &r->bitacora[i];
+        printf("    T-%-4d %-18s %+6.2f°  %+6.2f°  %+6.2f°  %6.2f°  %3d\n",
+               tr->t, NOMBRES_MANIOBRAS[tr->maniobra], tr->delta_pulso,
+               tr->deriva, tr->omega_resultante, tr->gamma_resultante, tr->rcs_restante);
+    }
+}
+
 void ejecutar_mision(const DatosMision *d, const Dificultad *dif, Reporte *rep)
 {
     EstadoAngulo estado;
-    double gamma;
 
     iniciar_reporte(rep, dif);
 
-    /* ---------- EVENTO 1: ventana de reingreso ---------- */
+    /* ---------- EVENTO 1: alineación de reingreso con RCS ---------- */
     printf("\n===== EVENTO 1: %s =====\n", NOMBRES_EVENTOS[0]);
-    printf("Ventana segura: %.1f° <= gamma <= %.1f°  |  Correcciones disponibles: %d\n",
-           GAMMA_MIN, GAMMA_MAX, dif->correcciones);
+    estado = minijuego_alineacion_rcs(dif, rep);
+    explicar_angulo(estado);
 
-    while (rep->eventos[0] == EV_PENDIENTE) {
-        gamma  = leer_double("Ángulo de reingreso gamma (grados)", 0.0, 90.0);
-        estado = resolver_angulo(rep, dif, gamma);
-        explicar_angulo(estado);
-
-        if (rep->eventos[0] == EV_FALLIDO) {
-            puts("  Sin propelente para más correcciones: SE PIERDE LA MISIÓN.");
-        } else if (estado != ANGULO_SEGURO) {
-            printf("  Corrección usada (%d/%d). Probá con otro ángulo.\n",
-                   rep->correcciones_usadas, dif->correcciones);
-        }
+    if (estado == ANGULO_SEGURO) {
+        puts("  -> Alineación lograda. EVENTO SUPERADO.");
+        rep->eventos[0] = EV_SUPERADO;
+    } else {
+        puts("  -> La nave llegó a la atmósfera fuera de la ventana: SE PIERDE LA MISIÓN.");
+        rep->eventos[0] = EV_FALLIDO;
     }
+    pausar();
+
     if (rep->eventos[0] == EV_FALLIDO) {
         calcular_puntaje(rep);
         return;
@@ -373,19 +563,38 @@ void ejecutar_mision(const DatosMision *d, const Dificultad *dif, Reporte *rep)
 
 void mostrar_reglas(void)
 {
-    puts("\n================ REGLAS DEL JUEGO ================");
+    puts("\n================ REGLAS DEL SIMULADOR ================");
     puts("Sos el director de vuelo del reingreso de la cápsula Orion (Artemis).");
-    puts("La misión tiene 3 eventos y se juega por turnos:");
-    puts("  1) Ventana de reingreso: elegís el ángulo gamma. Debe estar entre");
-    printf("     %.1f° y %.1f°. Si no, hay rebote atmosférico (muy chico) o\n", GAMMA_MIN, GAMMA_MAX);
-    puts("     desaceleración excesiva (muy grande). Cada error gasta una corrección.");
+    puts("La misión tiene 3 eventos y se juega por turnos:\n");
+
+    puts("  1) Alineación de reingreso con propulsores RCS:");
+    printf("     - Meta en t = 0: ángulo gamma entre %.1f° y %.1f° Y giro estabilizado\n",
+           GAMMA_MIN, GAMMA_MAX);
+    printf("       (|omega| <= %.2f°/turno). Si entra girando brusco, el escudo falla.\n",
+           OMEGA_MAX_SEGURO);
+    puts("     - Inercia (1.ª Ley de Newton): la cápsula conserva su velocidad de giro");
+    puts("       (omega) de un turno al siguiente. Si acelerás el giro para corregir el");
+    puts("       ángulo, deberás frenarlo con el propulsor opuesto antes de t = 0.");
+    puts("     - Radar: antes de cada turno te informa la anomalía exacta que empujará");
+    puts("       el giro de la nave para que puedas anticiparla.");
+    puts("     - Propulsores y enfriamiento:");
+    printf("         * Pulso suave  (±%.1f°/t, gasta %d RCS)\n", PULSO_SUAVE, COSTO_SUAVE);
+    printf("         * Pulso fuerte (±%.1f°/t, gasta %d RCS - recalienta toberas por 1 turno)\n",
+           PULSO_FUERTE, COSTO_FUERTE);
+    puts("         * Mantener actitud (0°/t, gasta 0 RCS y enfría toberas)");
+    puts("       Prógrado (-) aplana la trayectoria (baja gamma); retrógrado (+) la empina.\n");
+
     puts("  2) Frenado aerodinámico: se calcula el trabajo del rozamiento y la");
-    puts("     desaceleración media. Si supera el límite de g, la tripulación no resiste.");
+    puts("     desaceleración media. Si supera el límite de g, la tripulación no resiste.\n");
+
     puts("  3) Paracaídas y amerizaje: se calcula la fuerza promedio del agua.");
-    puts("     Si supera el límite, la estructura falla.");
-    puts("Puntaje: 300 por evento (-100 por cada corrección usada) + 100 de bonus");
-    puts("si completás todo sin correcciones. Máximo: 1000 puntos.");
-    puts("La dificultad cambia los límites y las correcciones disponibles.");
+    puts("     Si supera el límite, la estructura falla.\n");
+
+    printf("Puntaje: %d por evento (-%d por cada unidad de RCS usada en el Evento 1)\n",
+           PUNTOS_EVENTO, PENALIZACION_RCS);
+    printf("+ %d de bonus de precisión si completás todo con gamma a ±%.2f° de %.2f°.\n",
+           BONUS_PRECISION, TOLERANCIA_BONUS, GAMMA_CENTRO);
+    printf("Máximo: %d puntos.\n", NUM_EVENTOS * PUNTOS_EVENTO + BONUS_PRECISION);
 }
 
 void mostrar_datos(const DatosMision *d)
@@ -401,7 +610,6 @@ void mostrar_datos(const DatosMision *d)
     printf("  Hundimiento en el agua    : %.2f m\n", d->d_hundimiento);
 }
 
-/* Respuestas analíticas a las 4 preguntas del enunciado. */
 void mostrar_analisis(const DatosMision *d, double gamma)
 {
     double ei = energia_mecanica(d->masa, d->v_inicial, d->h_inicial);
@@ -445,11 +653,14 @@ void mostrar_reporte(const Reporte *r)
 {
     puts("\n=============== REPORTE FINAL DE LA MISIÓN ===============");
     printf("Dificultad           : %s\n", r->dificultad->nombre);
-    printf("Ángulo de reingreso  : %.2f°\n", r->gamma);
-    printf("Correcciones usadas  : %d de %d\n", r->correcciones_usadas, r->dificultad->correcciones);
+    printf("Ángulo inicial       : %.2f°\n", r->gamma_inicial);
+    printf("Ángulo en t = 0      : %.2f°\n", r->gamma);
+    printf("RCS usado            : %d de %d u.\n", r->rcs_usado, r->dificultad->combustible_rcs);
+    mostrar_bitacora_rcs(r);
+    putchar('\n');
 
     for (int i = 0; i < NUM_EVENTOS; i++) {
-        printf("Evento %d (%s): %s\n", i + 1, nombre_evento(i), nombre_estado_evento(r->eventos[i]));
+        printf("Evento %d (%s): %s\n", i + 1, NOMBRES_EVENTOS[i], nombre_estado_evento(r->eventos[i]));
     }
 
     if (r->eventos[1] != EV_PENDIENTE) {
@@ -461,7 +672,7 @@ void mostrar_reporte(const Reporte *r)
     }
 
     printf("\nPUNTAJE: %d / %d\n", r->puntaje,
-           NUM_EVENTOS * PUNTOS_EVENTO + BONUS_SIN_CORREC);
+           NUM_EVENTOS * PUNTOS_EVENTO + BONUS_PRECISION);
     puts(r->exito ? "RESULTADO: ¡MISIÓN EXITOSA! La tripulación está a salvo."
                   : "RESULTADO: MISIÓN FALLIDA.");
 }

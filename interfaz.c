@@ -43,6 +43,24 @@ static int boton(int x, int y, int ancho, int alto, const char *texto)
     return GuiButton((Rectangle){ (float)x, (float)y, (float)ancho, (float)alto }, texto);
 }
 
+static int boton_doble(int x, int y, int ancho, int alto,
+                       const char *linea1, const char *linea2)
+{
+    int clic = GuiButton((Rectangle){ (float)x, (float)y, (float)ancho, (float)alto }, "");
+    int deshabilitado = (GuiGetState() == STATE_DISABLED);
+
+    Color c1 = deshabilitado ? (Color){ 111, 122, 168, 255 } : COLOR_TEXTO;
+    Color c2 = deshabilitado ? (Color){  85,  95, 135, 255 } : COLOR_AVISO;
+
+    int w1 = MeasureText(linea1, 18);
+    int w2 = MeasureText(linea2, 14);
+
+    DrawText(linea1, x + (ancho - w1) / 2, y + 7,  18, c1);
+    DrawText(linea2, x + (ancho - w2) / 2, y + 28, 14, c2);
+
+    return clic;
+}
+
 /* Barra de progreso con color según el límite (verde / amarillo / rojo). */
 static void dibujar_barra(int x, int y, int ancho, const char *titulo,
                           double valor, double limite, const char *unidad)
@@ -157,11 +175,10 @@ static void iniciar_mision(Juego *j, const Dificultad *dif)
 {
     j->dificultad = dif;
     iniciar_reporte(&j->reporte, dif);
-    j->gamma = 6.0f;
+    j->gamma = (float)j->reporte.gamma;
     j->hubo_intento = 0;
     j->pantalla = PANTALLA_EVENTO1;
 }
-
 static void pasar_a_frenado(Juego *j)
 {
     resolver_frenado(&j->datos, j->dificultad, &j->reporte);   /* se calcula UNA vez */
@@ -291,24 +308,44 @@ static void pantalla_menu(Juego *j)
 
 static void pantalla_reglas(Juego *j)
 {
-    DrawText("REGLAS DEL JUEGO", 60, 40, 32, COLOR_TEXTO);
-    DrawText("Sos el director de vuelo del reingreso de la cápsula Orion.", 60, 100, 20, COLOR_SUAVE);
-    DrawText("La misión tiene 3 eventos que se juegan en orden:", 60, 130, 20, COLOR_SUAVE);
+    DrawText("REGLAS DEL SIMULADOR", 60, 28, 30, COLOR_TEXTO);
+    DrawText("Sos el director de vuelo del reingreso de la cápsula Orion (Misión Artemis).", 60, 68, 18, COLOR_SUAVE);
 
-    DrawText(TextFormat("1) Ventana de reingreso: el ángulo debe estar entre %.1f° y %.1f°.", GAMMA_MIN, GAMMA_MAX),
-             60, 175, 20, COLOR_TEXTO);
-    DrawText("    Muy chico: rebote atmosférico. Muy grande: desaceleración excesiva.", 60, 202, 18, COLOR_SUAVE);
-    DrawText("    Cada error gasta una corrección de trayectoria.", 60, 226, 18, COLOR_SUAVE);
+    /* Evento 1 detallado con las nuevas mecánicas */
+    DrawText("1) Evento 1 - Alineación de Reingreso con RCS (por turnos):", 60, 104, 19, COLOR_TEXTO);
+    DrawText(TextFormat("   • Meta en t = 0: llegar con ángulo entre %.1f° y %.1f° Y giro estable (|giro| <= %.2f°/t).",
+                        GAMMA_MIN, GAMMA_MAX, OMEGA_MAX_SEGURO),
+             60, 130, 16, COLOR_OK);
+    DrawText("   • Inercia (1.ª Ley de Newton): la nave conserva su velocidad de giro (omega) entre turnos.",
+             60, 152, 16, COLOR_SUAVE);
+    DrawText(TextFormat("   • Propulsores: Pulso Suave (±%.1f°/t, %d RCS), Pulso Fuerte (±%.1f°/t, %d RCS) o Mantener.",
+                        PULSO_SUAVE, COSTO_SUAVE, PULSO_FUERTE, COSTO_FUERTE),
+             60, 174, 16, COLOR_SUAVE);
+    DrawText("   • Prógrado (-) aplana la trayectoria (baja el ángulo); Retrógrado (+) la empina (sube).",
+             60, 196, 16, COLOR_SUAVE);
+    DrawText("   • Toberas y Radar: usar un Pulso Fuerte recalienta las toberas por 1 turno. El Radar",
+             60, 218, 16, COLOR_SUAVE);
+    DrawText("     anticipa la anomalía gravitatoria/atmosférica que actuará en el turno actual.",
+             60, 238, 16, COLOR_SUAVE);
 
-    DrawText("2) Frenado aerodinámico: la carga de g no debe superar el límite.", 60, 266, 20, COLOR_TEXTO);
-    DrawText("3) Amerizaje: la fuerza del agua no debe superar el límite.", 60, 306, 20, COLOR_TEXTO);
+    /* Eventos 2 y 3 */
+    DrawText("2) Evento 2 - Frenado Aerodinámico: la desaceleración media no debe superar los g máximos.",
+             60, 274, 19, COLOR_TEXTO);
+    DrawText("3) Evento 3 - Paracaídas y Amerizaje: la fuerza del agua no debe quebrar la estructura.",
+             60, 306, 19, COLOR_TEXTO);
 
-    DrawText(TextFormat("Puntaje: %d por evento (-%d por corrección usada en el 1°)", PUNTOS_EVENTO, PENALIZACION_CORR),
-             60, 356, 20, COLOR_AVISO);
-    DrawText(TextFormat("+ %d de bonus si completás todo sin usar correcciones. Máximo: %d.",
-                        BONUS_SIN_CORREC, NUM_EVENTOS * PUNTOS_EVENTO + BONUS_SIN_CORREC),
-             60, 384, 20, COLOR_AVISO);
-    DrawText("La dificultad cambia los límites y las correcciones disponibles.", 60, 424, 20, COLOR_SUAVE);
+    /* Sistema de puntaje */
+    DrawRectangle(60, 344, 780, 108, (Color){ 16, 24, 48, 255 });
+    DrawRectangleLines(60, 344, 780, 108, COLOR_BARRA);
+    DrawText(TextFormat("PUNTAJE: %d pts por evento superado (-%d pts por cada unidad de RCS gastada).",
+                        PUNTOS_EVENTO, PENALIZACION_RCS),
+             78, 360, 17, COLOR_AVISO);
+    DrawText(TextFormat("BONUS DE PRECISIÓN: +%d pts si completás la misión con ángulo a ±%.2f° de %.2f°.",
+                        BONUS_PRECISION, TOLERANCIA_BONUS, GAMMA_CENTRO),
+             78, 388, 17, COLOR_AVISO);
+    DrawText(TextFormat("Puntaje máximo posible: %d puntos. La dificultad ajusta RCS, turnos, deriva y límites g.",
+                        NUM_EVENTOS * PUNTOS_EVENTO + BONUS_PRECISION),
+             78, 416, 16, COLOR_SUAVE);
 
     if (boton(60, 480, 240, 50, "Volver al menú")) j->pantalla = PANTALLA_MENU;
 }
@@ -372,9 +409,11 @@ static void pantalla_dificultad(Juego *j)
         if (boton(60, y, 240, 70, dif->nombre)) {
             iniciar_mision(j, dif);
         }
-        DrawText(TextFormat("Frenado: máx. %.1f g", dif->limite_g_frenado), 330, y + 8, 20, COLOR_TEXTO);
-        DrawText(TextFormat("Amerizaje: máx. %.1fx el peso  |  Correcciones: %d",
-                            dif->limite_g_impacto, dif->correcciones),
+        DrawText(TextFormat("Frenado: máx. %.1f g   |   Amerizaje: máx. %.1fx el peso",
+                            dif->limite_g_frenado, dif->limite_g_impacto),
+                 330, y + 8, 19, COLOR_TEXTO);
+        DrawText(TextFormat("RCS: %d u.  |  Turnos: %d  |  Deriva: ±%.2f°/turno",
+                            dif->combustible_rcs, dif->turnos_rcs, dif->deriva_max),
                  330, y + 38, 18, COLOR_SUAVE);
     }
 
@@ -586,66 +625,166 @@ static void pantalla_analisis(Juego *j)
                  455, 514, 14, COLOR_AVISO);
     }
 }
+
+/* Visor espacial limpio y amplio en la parte superior */
+static void dibujar_aproximacion_evento1(int x, int y, int ancho, int alto, const Reporte *r)
+{
+    const Dificultad *dif = r->dificultad;
+    float progreso = (dif->turnos_rcs > 0)
+                   ? (float)r->num_turnos / (float)dif->turnos_rcs : 1.0f;
+
+    DrawRectangle(x, y, ancho, alto, (Color){ 8, 12, 26, 255 });
+    DrawRectangleLines(x, y, ancho, alto, COLOR_BARRA);
+
+    /* Banda atmosférica a la derecha (meta en t = 0) */
+    int x_atm = x + ancho - 110;
+    DrawRectangle(x_atm, y + 1, 109, alto - 2, (Color){ 25, 65, 135, 120 });
+    DrawLine(x_atm, y, x_atm, y + alto, COLOR_AVISO);
+    DrawText("INTERFAZ\n120 km", x_atm + 18, y + 14, 15, COLOR_SUAVE);
+
+    /* Corredor seguro (5.5° a 7.0°) */
+    int y_min_seg = y + (int)((GAMMA_MIN / GAMMA_ESCALA) * alto);
+    int y_max_seg = y + (int)((GAMMA_MAX / GAMMA_ESCALA) * alto);
+    DrawRectangle(x_atm, y_min_seg, 109, y_max_seg - y_min_seg, (Color){ 60, 220, 120, 85 });
+    DrawLine(x + 40, y + alto / 2, x_atm, y_min_seg, (Color){ 60, 220, 120, 90 });
+    DrawLine(x + 40, y + alto / 2, x_atm, y_max_seg, (Color){ 60, 220, 120, 90 });
+    DrawText("5.5° - 7.0°", x_atm + 18, (y_min_seg + y_max_seg) / 2 - 7, 14, COLOR_OK);
+
+    /* Posición actual de la cápsula */
+    float nav_x = (float)(x + 60) + progreso * (float)(x_atm - x - 75);
+    float gamma_clamp = (float)r->gamma;
+    if (gamma_clamp < 0.5f) gamma_clamp = 0.5f;
+    if (gamma_clamp > 14.5f) gamma_clamp = 14.5f;
+    float nav_y = (float)y + (gamma_clamp / GAMMA_ESCALA) * (float)alto;
+
+    /* Vector de predicción para el próximo turno */
+    if (r->eventos[0] == EV_PENDIENTE) {
+        float prox_x = (float)(x + 60) + ((float)(r->num_turnos + 1) / (float)dif->turnos_rcs) * (float)(x_atm - x - 75);
+        float prox_gamma = (float)(r->gamma + r->omega + r->deriva_proxima);
+        if (prox_gamma < 0.5f) prox_gamma = 0.5f;
+        if (prox_gamma > 14.5f) prox_gamma = 14.5f;
+        float prox_y = (float)y + (prox_gamma / GAMMA_ESCALA) * (float)alto;
+
+        DrawLineEx((Vector2){ nav_x, nav_y }, (Vector2){ prox_x, prox_y }, 2.0f, COLOR_AVISO);
+        DrawCircle((int)prox_x, (int)prox_y, 4, COLOR_AVISO);
+    }
+
+    /* Dibujo vectorial de la cápsula Orion */
+    EstadoAngulo est = clasificar_angulo(r->gamma);
+    Color c_nave = (est == ANGULO_SEGURO) ? COLOR_OK
+                 : (est == ANGULO_REBOTE) ? COLOR_AVISO : COLOR_ERROR;
+
+    DrawTriangle((Vector2){ nav_x - 14, nav_y - 10 },
+                 (Vector2){ nav_x - 14, nav_y + 10 },
+                 (Vector2){ nav_x + 12, nav_y },
+                 c_nave);
+    DrawLineEx((Vector2){ nav_x + 12, nav_y - 8 },
+               (Vector2){ nav_x + 12, nav_y + 8 }, 3.5f, COLOR_TEXTO);
+}
 static void pantalla_evento1(Juego *j)
 {
-    const Reporte *r = &j->reporte;
-    int restantes = j->dificultad->correcciones - r->correcciones_usadas;
+    Reporte *r = &j->reporte;
+    const Dificultad *dif = j->dificultad;
+    int rcs_restante = dif->combustible_rcs - r->rcs_usado;
+    int turnos_rest  = dif->turnos_rcs - r->num_turnos;
 
-    DrawText("EVENTO 1: VENTANA DE REINGRESO", 40, 30, 28, COLOR_TEXTO);
-    DrawText(TextFormat("Ángulo de reingreso: %.1f°", j->gamma), 40, 90, 22, COLOR_TEXTO);
+    /* Encabezado y línea única de telemetría limpia */
+    DrawText("EVENTO 1: ALINEACIÓN CON RCS", 40, 20, 26, COLOR_TEXTO);
+    DrawText(TextFormat("Ángulo: %.2f°   |   Giro: %+.2f°/t   |   Radar: %+.2f°/t   |   Turnos: %d   |   RCS: %d/%d",
+                        r->gamma, r->omega, r->deriva_proxima,
+                        turnos_rest, rcs_restante, dif->combustible_rcs),
+             40, 54, 18, COLOR_SUAVE);
 
-    if (r->eventos[0] != EV_PENDIENTE) {
-        GuiDisable();                           /* ya no se puede mover el slider */
-    }
-    GuiSlider((Rectangle){ 40, 140, 500, 28 }, "0°", "15°", &j->gamma, 0.0f, GAMMA_ESCALA);
-    GuiEnable();
+    /* Gráfico grande arriba aprovechando todo el ancho */
+    dibujar_aproximacion_evento1(40, 84, 820, 205, r);
 
-    dibujar_ventana_angulo(40, 230, 500, j->gamma);
-    DrawText(TextFormat("Ventana segura: %.1f° a %.1f°", GAMMA_MIN, GAMMA_MAX), 40, 330, 18, COLOR_SUAVE);
-
-    /* Panel de resultado (columna derecha) */
-    DrawText("RESULTADO", 590, 90, 24, COLOR_TEXTO);
-    DrawText(TextFormat("Correcciones: %d de %d", restantes, j->dificultad->correcciones),
-             590, 125, 18, COLOR_AVISO);
-
-    if (!j->hubo_intento) {
-        DrawText("Elegí el ángulo y tocá\n\"Confirmar ángulo\".", 590, 170, 20, COLOR_SUAVE);
-    } else {
-        switch (j->ultimo_angulo) {
-        case ANGULO_REBOTE:
-            DrawText("REBOTE ATMOSFÉRICO", 590, 170, 22, COLOR_AVISO);
-            DrawText("El ángulo es muy chico: la\ncápsula rebota y vuelve\nal espacio.", 590, 205, 18, COLOR_SUAVE);
-            break;
-        case ANGULO_EXCESIVO:
-            DrawText("DESACELERACIÓN\nEXCESIVA", 590, 170, 22, COLOR_ERROR);
-            DrawText("El ángulo es muy grande:\nel frenado es demasiado\nbrusco.", 590, 240, 18, COLOR_SUAVE);
-            break;
-        default:
-            DrawText("VENTANA SEGURA", 590, 170, 22, COLOR_OK);
-            DrawText("El ángulo permite un\nfrenado controlado.", 590, 205, 18, COLOR_SUAVE);
-            break;
-        }
-        if (r->eventos[0] == EV_FALLIDO) {
-            DrawText("Sin correcciones:\nse pierde la misión.", 590, 340, 22, COLOR_ERROR);
-        } else if (r->eventos[0] == EV_PENDIENTE) {
-            DrawText("Probá con otro ángulo.", 590, 340, 20, COLOR_TEXTO);
-        }
-    }
-
-    /* Botón principal: cambia según cómo va el evento */
+    /* --- Abajo a la izquierda: Botones de dos líneas --- */
     if (r->eventos[0] == EV_PENDIENTE) {
-        if (boton(40, 480, 300, 50, "Confirmar ángulo")) {
-            j->ultimo_angulo = resolver_angulo(&j->reporte, j->dificultad, j->gamma);
-            j->hubo_intento = 1;
+        /* Fila 1: Pulsos suaves */
+        if (rcs_restante < COSTO_SUAVE) GuiDisable();
+        if (boton_doble(40, 304, 228, 48, "Suave Prógrado", "-0.4°/t  |  1 RCS")) {
+            aplicar_turno_rcs(r, MANIOBRA_SUAVE, -1);
+            j->gamma = (float)r->gamma;
         }
-    } else if (r->eventos[0] == EV_SUPERADO) {
-        if (boton(40, 480, 300, 50, "Continuar al frenado")) pasar_a_frenado(j);
-    } else {
-        if (boton(40, 480, 300, 50, "Ver reporte final")) terminar_mision(j);
-    }
-    if (boton(360, 480, 240, 50, "Abandonar misión")) j->pantalla = PANTALLA_MENU;
-}
+        if (boton_doble(282, 304, 228, 48, "Suave Retrógrado", "+0.4°/t  |  1 RCS")) {
+            aplicar_turno_rcs(r, MANIOBRA_SUAVE, +1);
+            j->gamma = (float)r->gamma;
+        }
+        GuiEnable();
 
+        /* Fila 2: Pulsos fuertes */
+        if (rcs_restante < COSTO_FUERTE || r->rcs_recalentado) GuiDisable();
+        if (boton_doble(40, 362, 228, 48, "Fuerte Prógrado",
+                        r->rcs_recalentado ? "EN ENFRIAMIENTO" : "-1.0°/t  |  2 RCS")) {
+            aplicar_turno_rcs(r, MANIOBRA_FUERTE, -1);
+            j->gamma = (float)r->gamma;
+        }
+        if (boton_doble(282, 362, 228, 48, "Fuerte Retrógrado",
+                        r->rcs_recalentado ? "EN ENFRIAMIENTO" : "+1.0°/t  |  2 RCS")) {
+            aplicar_turno_rcs(r, MANIOBRA_FUERTE, +1);
+            j->gamma = (float)r->gamma;
+        }
+        GuiEnable();
+
+        /* Fila 3: Mantener actitud */
+        if (boton_doble(40, 420, 470, 48, "Mantener actitud", "0.0°/t  |  0 RCS (enfría toberas)")) {
+            aplicar_turno_rcs(r, MANIOBRA_MANTENER, 0);
+            j->gamma = (float)r->gamma;
+        }
+    } else {
+        /* Cuadro de resultado al llegar a t = 0 */
+        EstadoAngulo est_final = clasificar_angulo(r->gamma);
+        int giro_ok = (fabs(r->omega) <= OMEGA_MAX_SEGURO);
+
+        DrawRectangle(40, 304, 470, 164, (Color){ 16, 24, 48, 255 });
+        DrawRectangleLines(40, 304, 470, 164, COLOR_BARRA);
+
+        if (r->eventos[0] == EV_SUPERADO) {
+            DrawText("CORREDOR CAPTURADO - EVENTO SUPERADO", 58, 326, 18, COLOR_OK);
+            DrawText(TextFormat("Ingreso exitoso a %.2f° (giro %+.2f°/t).\nLa cápsula inicia el frenado aerodinámico.",
+                                r->gamma, r->omega), 58, 362, 17, COLOR_SUAVE);
+        } else if (!giro_ok && est_final == ANGULO_SEGURO) {
+            DrawText("FALLO DE ACTITUD: GIRO INESTABLE", 58, 326, 18, COLOR_ERROR);
+            DrawText(TextFormat("Ángulo en zona (%.2f°), pero giro excesivo\n(omega = %+.2f°/t, máx ±%.2f°/t).",
+                                r->gamma, r->omega, OMEGA_MAX_SEGURO), 58, 362, 17, COLOR_SUAVE);
+        } else if (est_final == ANGULO_REBOTE) {
+            DrawText("REBOTE ATMOSFÉRICO - MISIÓN PERDIDA", 58, 326, 18, COLOR_AVISO);
+            DrawText("Ángulo menor a 5.5°: la nave rebota al espacio.", 58, 362, 17, COLOR_SUAVE);
+        } else {
+            DrawText("DESACELERACIÓN EXCESIVA - MISIÓN PERDIDA", 58, 326, 18, COLOR_ERROR);
+            DrawText("Ángulo mayor a 7.0°: supera el límite estructural.", 58, 362, 17, COLOR_SUAVE);
+        }
+    }
+
+    /* --- Abajo a la derecha: Bitácora compacta (mitad de altura) --- */
+    DrawRectangle(535, 304, 325, 164, (Color){ 16, 24, 48, 255 });
+    DrawRectangleLines(535, 304, 325, 164, COLOR_BARRA);
+    DrawText("BITÁCORA RCS", 550, 312, 16, COLOR_AVISO);
+    DrawText("T     Pulso   Radar   Giro   Gamma  RCS", 550, 334, 13, COLOR_TEXTO);
+    DrawRectangle(550, 350, 295, 1, COLOR_BARRA);
+
+    DrawText(TextFormat("Ini     -       -    %+5.2f  %5.2f°  %2d",
+                        (r->gamma_inicial < GAMMA_MIN) ? -0.20 : +0.20,
+                        r->gamma_inicial, dif->combustible_rcs),
+             550, 356, 13, COLOR_SUAVE);
+
+    for (int i = 0; i < r->num_turnos; i++) {
+        const TurnoRCS *tr = &r->bitacora[i];
+        int fila_y = 376 + i * 21;
+        DrawText(TextFormat("T-%d  %+5.2f  %+5.2f  %+5.2f  %5.2f°  %2d",
+                            tr->t, tr->delta_pulso, tr->deriva,
+                            tr->omega_resultante, tr->gamma_resultante, tr->rcs_restante),
+                 550, fila_y, 13, COLOR_TEXTO);
+    }
+
+    /* Botones de navegación inferiores */
+    if (r->eventos[0] == EV_SUPERADO) {
+        if (boton(40, 488, 300, 46, "Continuar al frenado")) pasar_a_frenado(j);
+    } else if (r->eventos[0] == EV_FALLIDO) {
+        if (boton(40, 488, 300, 46, "Ver reporte final")) terminar_mision(j);
+    }
+    if (boton(360, 488, 240, 46, "Abandonar misión")) j->pantalla = PANTALLA_MENU;
+}
 static void pantalla_evento2(Juego *j)
 {
     const Reporte *r = &j->reporte;
@@ -723,10 +862,10 @@ static void pantalla_reporte(Juego *j)
 
     DrawText("REPORTE FINAL DE LA MISIÓN", 40, 30, 28, COLOR_TEXTO);
 
-    DrawText(TextFormat("Dificultad: %s", r->dificultad->nombre), 40, y, 20, COLOR_TEXTO);
+   DrawText(TextFormat("Dificultad: %s", r->dificultad->nombre), 40, y, 20, COLOR_TEXTO);
     y += 32;
-    DrawText(TextFormat("Ángulo de reingreso: %.2f°   |   Correcciones usadas: %d de %d",
-                        r->gamma, r->correcciones_usadas, r->dificultad->correcciones),
+    DrawText(TextFormat("Ángulo inicial: %.2f°  ->  Final (t=0): %.2f°   |   RCS usado: %d de %d u.",
+                        r->gamma_inicial, r->gamma, r->rcs_usado, r->dificultad->combustible_rcs),
              40, y, 20, COLOR_TEXTO);
     y += 44;
 
@@ -754,7 +893,7 @@ static void pantalla_reporte(Juego *j)
         y += 30;
     }
 
-    DrawText(TextFormat("PUNTAJE: %d / %d", r->puntaje, NUM_EVENTOS * PUNTOS_EVENTO + BONUS_SIN_CORREC),
+    DrawText(TextFormat("PUNTAJE: %d / %d", r->puntaje, NUM_EVENTOS * PUNTOS_EVENTO + BONUS_PRECISION),
              40, 390, 30, COLOR_AVISO);
     DrawText(r->exito ? "MISIÓN EXITOSA: la tripulación está a salvo." : "MISIÓN FALLIDA.",
              40, 432, 26, r->exito ? COLOR_OK : COLOR_ERROR);
@@ -763,9 +902,7 @@ static void pantalla_reporte(Juego *j)
     if (boton(300, 490, 240, 50, "Volver al menú")) j->pantalla = PANTALLA_MENU;
 }
 
-/* =====================================================================
- *                         INTERFAZ PÚBLICA
- * ===================================================================== */
+
 
 void juego_iniciar(Juego *j)
 {

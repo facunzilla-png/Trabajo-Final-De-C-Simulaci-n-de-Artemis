@@ -1,12 +1,3 @@
-/*
- * artemis.h
- * Situación-Problema 4: Reingreso atmosférico, frenado aerodinámico y amerizaje.
- * Contiene: constantes, tipos de datos y prototipos de funciones públicas.
- *
- * Las funciones de la sección "LÓGICA DE LA MISIÓN" NO imprimen ni leen teclado:
- * reciben datos y devuelven resultados. Por eso las usan tanto la versión de
- * consola como la interfaz gráfica.
- */
 #ifndef ARTEMIS_H
 #define ARTEMIS_H
 
@@ -26,18 +17,34 @@
 /* ====================== REGLAS DEL JUEGO ====================== */
 #define GAMMA_MIN          5.5       /* grados: por debajo -> rebote    */
 #define GAMMA_MAX          7.0       /* grados: por encima -> excesivo  */
+#define GAMMA_CENTRO       ((GAMMA_MIN + GAMMA_MAX) / 2.0)
 #define NUM_PASOS_FRENADO  8         /* filas de la tabla de frenado    */
 #define TAM_TABLA          (NUM_PASOS_FRENADO + 1)  /* incluye t = 0    */
 #define NUM_EVENTOS        3
 #define NUM_DIFICULTADES   3
 #define PUNTOS_EVENTO      300
-#define PENALIZACION_CORR  100
-#define BONUS_SIN_CORREC   100
-#define TAM_MENSAJE        128       /* largo máximo de un mensaje de error */
+#define PENALIZACION_RCS   25        /* puntos por cada unidad de RCS gastada */
+#define BONUS_PRECISION    100       /* misión exitosa y gamma casi centrado  */
+#define TOLERANCIA_BONUS   0.25      /* grados respecto de GAMMA_CENTRO       */
+#define TAM_MENSAJE        128       /* largo máximo de un mensaje de error   */
+
+/* ========== MINIJUEGO EVENTO 1: ALINEACIÓN CON PROPULSORES RCS ========== */
+#define MAX_TURNOS_RCS     5         /* tamaño máximo de la bitácora          */
+#define GAMMA_INI_BAJO_MIN 3.6       /* desvío inicial por debajo (rebote)    */
+#define GAMMA_INI_BAJO_MAX 4.7
+#define GAMMA_INI_ALTO_MIN 7.8       /* desvío inicial por encima (excesivo)  */
+#define GAMMA_INI_ALTO_MAX 8.9
+#define PULSO_SUAVE        0.4       /* cambio de vel. angular omega (°/turno)*/
+#define PULSO_FUERTE       1.0       /* cambio de vel. angular omega (°/turno)*/
+#define COSTO_SUAVE        1         /* unidades de RCS                       */
+#define COSTO_FUERTE       2
+#define OMEGA_MAX_SEGURO   0.50      /* giro máx. tolerable al entrar (°/t)   */
+#define INDICADOR_MIN      2.0       /* rango del indicador gráfico de gamma  */
+#define INDICADOR_MAX      10.0
+#define INDICADOR_ANCHO    41        /* columnas del indicador (0,2° c/u)     */
 
 /* ========================== TIPOS DE DATOS ========================== */
 
-/* Datos de entrada de la misión (editables por el usuario). */
 typedef struct {
     double masa;            /* kg */
     double v_inicial;       /* m/s */
@@ -49,40 +56,62 @@ typedef struct {
     double d_hundimiento;   /* m */
 } DatosMision;
 
-/* Resultado de evaluar el ángulo de reingreso. */
 typedef enum {
     ANGULO_REBOTE,
     ANGULO_SEGURO,
     ANGULO_EXCESIVO
 } EstadoAngulo;
 
-/* Estado de cada evento de la misión. */
 typedef enum {
-    EV_PENDIENTE,           /* todavía no se jugó */
+    EV_PENDIENTE,
     EV_SUPERADO,
     EV_FALLIDO
 } EstadoEvento;
 
-/* Parámetros que cambian según la dificultad elegida. */
 typedef struct {
     const char *nombre;
     double limite_g_frenado;    /* g máximos tolerables en el frenado    */
     double limite_g_impacto;    /* fuerza máx. de amerizaje (x el peso)  */
-    int    correcciones;        /* correcciones de trayectoria (RCS)     */
+    int    combustible_rcs;     /* unidades de RCS para el Evento 1      */
+    int    turnos_rcs;          /* turnos hasta el borde atmosférico     */
+    double deriva_max;          /* perturbación máx. por turno (grados)  */
 } Dificultad;
 
-/* Una fila de la tabla de frenado. */
+typedef enum {
+    MANIOBRA_SUAVE = 1,         /* ±PULSO_SUAVE,  gasta COSTO_SUAVE  */
+    MANIOBRA_FUERTE,            /* ±PULSO_FUERTE, gasta COSTO_FUERTE */
+    MANIOBRA_MANTENER           /* 0°, no gasta: solo actúa la deriva */
+} TipoManiobra;
+
+
+typedef struct {
+    int          t;                 /* turnos que faltaban (T-t)        */
+    TipoManiobra maniobra;
+    double       delta_pulso;       /* impulso aplicado al giro (°/t)   */
+    double       deriva;            /* perturbación del turno (°/t)     */
+    double       omega_resultante;  /* velocidad angular final (°/t)    */
+    double       gamma_resultante;  /* ángulo al terminar el turno (°)  */
+    int          rcs_restante;
+} TurnoRCS;
+
+
 typedef struct {
     double tiempo;              /* s   */
     double velocidad;           /* m/s */
     double energia_cinetica;    /* J   */
 } PasoFrenado;
 
-/* Todo lo que ocurrió en una misión (se usa para el reporte final). */
+ 
 typedef struct {
     const Dificultad *dificultad;
-    double gamma;                       /* grados */
-    int    correcciones_usadas;
+    double gamma_inicial;               /* grados (desvío al azar)       */
+    double gamma;                       /* grados actuales / en t = 0    */
+    double omega;                       /* vel. angular actual (°/turno) */
+    double deriva_proxima;              /* lectura del radar p/ el turno */
+    int    rcs_recalentado;             /* 1 = pulso fuerte en enfriamiento */
+    int    rcs_usado;
+    int    num_turnos;
+    TurnoRCS bitacora[MAX_TURNOS_RCS];
     EstadoEvento eventos[NUM_EVENTOS];
 
     double energia_inicial;             /* J */
@@ -108,30 +137,25 @@ double calcular_trabajo_rozamiento(const DatosMision *d);
 double calcular_desaceleracion_media(const DatosMision *d);
 double calcular_fuerza_amerizaje(const DatosMision *d);
 EstadoAngulo clasificar_angulo(double gamma);
+double generar_gamma_inicial(void);
+double generar_deriva(double deriva_max);
 void generar_tabla_frenado(const DatosMision *d, PasoFrenado tabla[], int n);
 
-/* ============ LÓGICA DE LA MISIÓN (sin printf ni teclado) ============ */
-const Dificultad *obtener_dificultad(int indice);      /* 0 .. NUM_DIFICULTADES-1 */
-const char *nombre_evento(int indice);                 /* 0 .. NUM_EVENTOS-1      */
+/* ============ LÓGICA DE LA MISIÓN (compartida Consola + GUI) ============ */
+const Dificultad *obtener_dificultad(int indice);
+const char *nombre_evento(int indice);
 const char *nombre_estado_evento(EstadoEvento estado);
-
-/* Devuelve 1 si los datos son coherentes entre sí. Si no, devuelve 0 y deja
- * el motivo en 'mensaje' (en vez de imprimirlo). */
+const char *nombre_maniobra(TipoManiobra m);
 int datos_coherentes(const DatosMision *d, char *mensaje, int tam);
 
 void iniciar_reporte(Reporte *rep, const Dificultad *dif);
 
-/* Evento 1: evalúa el ángulo. Actualiza rep->gamma, las correcciones usadas y
- * rep->eventos[0] (SUPERADO si es seguro, FALLIDO si no quedan correcciones). */
-EstadoAngulo resolver_angulo(Reporte *rep, const Dificultad *dif, double gamma);
+/* Ejecuta un turno del minijuego RCS (sirve tanto para consola como para GUI).
+ * direccion: -1 para prógrado (baja gamma), +1 para retrógrado (sube gamma), 0 mantener. */
+void aplicar_turno_rcs(Reporte *rep, TipoManiobra m, int direccion);
 
-/* Evento 2: calcula trabajo, desaceleración y tabla. Marca rep->eventos[1]. */
 void resolver_frenado(const DatosMision *d, const Dificultad *dif, Reporte *rep);
-
-/* Evento 3: calcula la fuerza de amerizaje. Marca rep->eventos[2]. */
 void resolver_amerizaje(const DatosMision *d, const Dificultad *dif, Reporte *rep);
-
-/* Calcula puntaje y resultado final (rep->puntaje, rep->exito). */
 void calcular_puntaje(Reporte *rep);
 
 /* ================= VERSIÓN DE CONSOLA (usa printf y teclado) ================= */
